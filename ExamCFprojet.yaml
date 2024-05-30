@@ -1,0 +1,248 @@
+Parameters:
+  
+  vpcCIDR:
+    Type: String
+    Default: "10.50.0.0/16"
+    Description: "Enter Your VPC CIDR"
+
+  AMIid:
+    Type: String
+    Default: ami-0a0277ba899dd9fd3
+    Description: "Enter your ami id"
+
+  AZ1:
+    Type: String
+    Default: "us-east-2a"
+  
+  AZ2:
+    Type: String
+    Default: "us-east-2a"
+
+  Pubs1CIDR:
+     Type: String
+     Default: "10.50.1.0/24"
+
+  Privs1CIDR:
+     Type: String
+     Default: "10.50.2.0/24" 
+  
+  Pubs2CIDR:
+     Type: String
+     Default: "10.50.3.0/24"
+
+  Privs2CIDR:
+     Type: String
+     Default: "10.50.4.0/24"
+     
+  InstanceTypeParameter:
+    Type: String
+    Default: t2.micro
+    AllowedValues:
+      - t2.micro
+      - m1.small
+      - m1.large
+    Description: "Enter t2.micro, m1.small, or m1.large. Default is t2.micro."
+  
+  EC2keyPair:
+    Type: AWS::EC2::KeyPair::KeyName
+  
+  
+Resources:
+
+  customVPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref vpcCIDR
+      EnableDnsSupport: 'true'
+      EnableDnsHostnames: 'true'
+      Tags:
+        - Key: stack
+          Value: production
+
+  customInternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: stack
+          Value: production
+
+  AttachGateway:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref customVPC
+      InternetGatewayId: !Ref customInternetGateway
+
+  pubRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref customVPC
+      Tags:
+        - Key: stack
+          Value: production  
+
+  pubRoute:
+    Type: AWS::EC2::Route
+    DependsOn: AttachGateway
+    Properties:
+      RouteTableId: !Ref pubRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref customInternetGateway
+
+
+  pubSubnetS1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref customVPC
+      CidrBlock: !Ref Pubs1CIDR
+      AvailabilityZone: !Ref AZ1
+      MapPublicIpOnLaunch: true
+      Tags:
+      - Key: stack
+        Value: production
+
+  privSubnetS1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref customVPC
+      CidrBlock: !Ref Privs1CIDR
+      AvailabilityZone: !Ref AZ1
+      Tags:
+      - Key: stack
+        Value: production
+
+  pubSubnetS2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref customVPC 
+      CidrBlock: !Ref Pubs2CIDR
+      AvailabilityZone: !Ref AZ2
+      MapPublicIpOnLaunch: true
+      Tags:
+      - Key: stack
+        Value: production
+
+  privSubnetS2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref customVPC
+      CidrBlock: !Ref Privs2CIDR
+      AvailabilityZone: !Ref AZ2
+      Tags:
+      - Key: stack
+        Value: production
+  
+  pubSubnetS1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId:
+        Ref: pubSubnetS1
+      RouteTableId:
+        Ref: pubRouteTable
+
+  pubSubnetS2RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId:
+        Ref: pubSubnetS2
+      RouteTableId:
+        Ref: pubRouteTable
+
+
+  MyElasticIP:
+    Type: "AWS::EC2::EIP"
+    Properties:
+      Domain: "vpc"
+
+  MyNatGateway:
+    Type: "AWS::EC2::NatGateway"
+    Properties:
+      AllocationId: !GetAtt MyElasticIP.AllocationId
+      SubnetId: !Ref pubSubnetS1
+  
+  myPrivRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref customVPC
+
+  myPrivRoute:
+    Type: AWS::EC2::Route
+    DependsOn: AttachGateway
+    Properties:
+       RouteTableId:
+         Ref: myPrivRouteTable
+       DestinationCidrBlock: 0.0.0.0/0
+       GatewayId: !Ref MyNatGateway
+
+  privSubnetS1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId:
+        Ref: privSubnetS1
+      RouteTableId:
+        Ref: myPrivRouteTable
+
+  privSubnetS2RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId:
+        Ref: privSubnetS2
+      RouteTableId:
+        Ref: myPrivRouteTable
+
+  InstanceSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow http to client host
+      VpcId: !Ref customVPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+      SecurityGroupEgress:
+        - IpProtocol: "-1"
+          CidrIp: 0.0.0.0/0
+
+  EC2InstancePub: 
+    Type: AWS::EC2::Instance
+    Properties: 
+      ImageId: !Ref AMIid
+      KeyName: !Ref EC2keyPair
+      InstanceType: !Ref InstanceTypeParameter
+      SecurityGroupIds: 
+        - !Ref InstanceSecurityGroup
+      SubnetId: !Ref pubSubnetS1
+
+  EC2InstancePriv: 
+    Type: AWS::EC2::Instance
+    Properties: 
+      ImageId: !Ref AMIid
+      KeyName: !Ref EC2keyPair
+      InstanceType: !Ref InstanceTypeParameter
+      SecurityGroupIds: 
+        - !Ref InstanceSecurityGroup
+      SubnetId: !Ref privSubnetS1
+
+  MyDynamoDBTable:
+    Type: "AWS::DynamoDB::Table"
+    Properties: 
+      TableName: "metroddb"
+      AttributeDefinitions: 
+        - 
+          AttributeName: "PrimaryKey"
+          AttributeType: "S"
+      KeySchema: 
+        - 
+          AttributeName: "PrimaryKey"
+          KeyType: "HASH"
+      ProvisionedThroughput: 
+        ReadCapacityUnits: 5
+        WriteCapacityUnits: 5
+      
+
+
+  
